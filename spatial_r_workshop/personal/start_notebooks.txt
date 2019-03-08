@@ -1,0 +1,2 @@
+source activate r_version
+jupyter notebook
