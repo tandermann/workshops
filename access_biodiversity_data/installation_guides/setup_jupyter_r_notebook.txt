@@ -1,0 +1,6 @@
+install r environment to run jupyter
+* conda create -n r_env
+* source activate r_env
+* conda install -c r r-essentials r-spatial
+* conda install -c conda-forge geos r-rgeos r-rgdal
+* jupyter notebook
