@@ -1,0 +1,400 @@
+---
+title: "Advanced spatial R workshop"
+author: "Tobias Andermann"
+date: "9/27/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+In this exercise we are going to test which predictors are spatially significantly correlated with a biological variable. For example you would apply the tools we are covering in this workshop if you want to test if species diversity in your studied organism group is significantly correlated with temperature, precipitation, predator diversity, etc. While this is a common operation in particular in marco-ecological/-evolutionary studies, there are several caveats that one needs to account for. Here we will deal with the main ones, which are namely raster projection, testing for and accounting for spatial autocorrelation and applying different models (namely GLM and SAR) for statistical testing.
+
+In this scenario we will check which environmental predictors have a significant influence on human population density.
+
+
+### Loading data
+
+As input data in this tutorial we will be using global data on human population density. You can run this tutorial in the same manner using other input data such as e.g. grid data of species diversity, occurrence maps, etc.
+
+The data was downloaded from <https://sedac.ciesin.columbia.edu/data/set/gpw-v4-population-count-rev11> and contains a ~5km grid of human population densities world wide.
+
+Let's load the data:
+
+```{r, message=FALSE, warning=FALSE}
+library(raster)
+human_pop_file='../data/human_pop_density/geotiff/gpw_v4_population_count_rev11_2020_2pt5_min.tif'
+human_pop_data = raster(human_pop_file)
+```
+
+Let's see what the data looks like by plotting it on a world map. for this purpose we first need to load the shape of the world map, which can be easily done like this:
+
+```{r, message=FALSE, warning=FALSE}
+library(rworldmap)
+world_map <- getMap(resolution = "li")
+```
+
+Now we can plot the raster data on top of the world map:
+
+```{r, message=FALSE, warning=FALSE}
+plot(world_map)
+plot(human_pop_data,add=T)
+```
+
+Displaying the raw values makes it difficult to get an impression of the data, since there are some areas with very high population density (e.g. city centers) that stretch the color-scale, making it impossible to see differences in the data between most parts of the world. A common way to fix this is to log-transform your data, which compresses the range of the data, making small differences more visible (notice use of the function `log()`.
+
+```{r, message=FALSE, warning=FALSE,cache=TRUE}
+plot(world_map)
+plot(log(human_pop_data),add=T)
+```
+
+
+### Map projections
+
+To get an idea of your raster, just print the raster object to screen :
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+human_pop_data
+```
+
+You can also extract the values relating to your cluster object individually. 
+For example you can check the resolution of the raster object using the `res()` command.
+
+```{r, message=FALSE, warning=FALSE}
+res(human_pop_data)
+```
+
+This tells you how fine the grid of the raster is. The resolution of our raster of approx. 0.042x0.042 degrees roughly equates to a 5x5km grid.
+
+If you want to rescale your raster to a coarser resolution (e.g. to reduce the size of the object and increase computational speed) you can use the `aggregate()` function. Say you want to change the resolution of your raster to roughly 0.1 grid size (approx. 10x10km grid), you can rescale the raster by factor `0.1/res(human_pop_data)`. Note that the aggregate function only accepts integer values, so we won't be able to rescale the data exactly to 0.1x0.1 grid, because the factor needed for that would be 2.4. Instead it rescales it by the closest integer value, which is 2 in this case.
+
+```{r, message=FALSE, warning=FALSE,cache=TRUE}
+human_pop_data_rescaled = aggregate(human_pop_data, fact = 1/res(human_pop_data))
+res(human_pop_data_rescaled)
+```
+
+Another value you can extract from your raster object is how many cells it contains along the x and y axis.
+
+```{r, message=FALSE, warning=FALSE}
+dim(human_pop_data_rescaled)
+```
+
+You can get an idea of the coordinate system your raster data is stored in by checking the extent of the raster:
+
+```{r, message=FALSE, warning=FALSE}
+extent(human_pop_data_rescaled)
+```
+
+This is how you check the projection of the cluster:
+
+```{r, message=FALSE, warning=FALSE}
+projection(human_pop_data_rescaled)
+```
+
+WGS84 is essentially the Mercator projection we talked about in the introduction slides, ranging from -180 to 180 in longitude and -90 to 90 in latitude.
+To change the raster to a different projection you can use the `projectRaster()` function.
+
+Let's transform the raster into CEA (Cylindrical Equal Area) projection, nested at latitude 30:
+
+```{r, message=FALSE, warning=FALSE,cache=TRUE}
+human_pop_data_cea = projectRaster(human_pop_data_rescaled,crs="+proj=cea +datum=WGS84 +lat_ts=30")
+```
+
+Notice how the resolution of your raster has changed too by transforming it into another projection. This is expected because the cells of the raster are being restructured and altered in size when changing from one projection into another.
+
+
+```{r, message=FALSE, warning=FALSE}
+dim(human_pop_data_cea)
+```
+
+The point of transforming the cells into CEA projection in this case is that we want the cells to be approximately equal in length and width (quadratic) for our following operations. It is impossible to project a globe into perfectly square grid cells, which is why we have to resort to picking a reference point (in our case latitude=30) where we scale our grid-cells to be quadratic. However, the further a grid cell is away from this latitude, the less quadratic it is going to be. Since most of the global landmass is in the Northern hemisphere, picking this latitude is usually the best solution for global analyses. If however you find yourself working on spatial data only pertaining to South America, you may consider picking a different latitude (e.g. the equator at latitude=0).
+
+Let's check the new projection of our raster object:
+
+```{r, message=FALSE, warning=FALSE}
+projection(human_pop_data_cea)
+```
+
+
+
+### Fitting linear models
+
+```{r, message=FALSE, warning=FALSE}
+global_temp = read.csv('../data/global_temp.txt',sep='\t')
+co2 = read.csv('../data/co2.txt',sep='\t')
+plot(co2$co2,global_temp$Temperature, pch = 16, xlab = "co2", ylab = "Temperature")
+```
+
+```{r, message=FALSE, warning=FALSE}
+combined = cbind(global_temp,co2)
+model <- glm(Temperature ~ co2, family = gaussian ,data = combined)
+xweight <- seq(range(co2$co2)[1], range(co2$co2)[2], 0.01)
+yweight <- predict(model, list(co2 = xweight),type="response")
+plot(co2$co2,global_temp$Temperature, pch = 16, xlab = "co2", ylab = "Temperature")
+lines(xweight, yweight,col='red')
+```
+### Temporal auto-correlation
+
+*Disclaimer: Some of the following examples are borrowed from a great tutorial on spatial auto-correlation at <https://rspatial.org/raster/analysis/3-spauto.html>*.
+
+Before we get into spatial auto-correlation in particular, let's first talk about auto-correlation in general. If your data are auto-correlated, it means that they are not independent data points but that they are correlated to some extent. When using auto-correlated data without correcting for the correlation, one usually greatly overestimates the effective sample size.
+
+For example if you want to measure a person's weight through time, you would expect two measurements which are close to each other in time to also be similar in the measured variable. To measure the degree of association over time, we can compute the correlation of each observation with the next observation.
+
+Check for temporal auto-correlation. We are going to compute the "one-lag" auto-correlation, which means that we compare each value to its immediate neighbour, and not to other nearby values.
+
+```{r, message=FALSE, warning=FALSE}
+values <- co2$co2
+a <- values[-length(values)]
+b <- values[-1]
+print(cor(a,b))
+```
+
+```{r, message=FALSE, warning=FALSE}
+values <- global_temp$Temperature
+a <- values[-length(values)]
+b <- values[-1]
+cor(a,b)
+```
+
+These values indicate a very strong positive temporal auto-correlation for the "one-lag" method. There are also integrated and more elegant ways in R for determining auto-correlation than our manual implementation of the "one-lag" auto-correlation. For example the `acf()` function computes the autocorrelation for several lags:
+
+```{r, message=FALSE, warning=FALSE}
+acf(co2$co2)
+```
+
+```{r, message=FALSE, warning=FALSE}
+acf(global_temp$Temperature)
+```
+
+We see that both global temperature and CO2 content of the atmosphere each show a strongly positive temporal auto-correlation. In this case it is caused by a clear temporal trend in the data, since CO2 levels are increasing with time and the temparature in reponse increases as well. However, temporal auto-correlation could also occur if data points of "neighbouring" years influence each other, without there being an overall trend.
+
+
+### Spatial auto-correlation
+
+Similar to temporal auto-correlation, spatial auto-correlation means that two points or raster cells that are close to each other in space have similar values. In our example, in case our raster cells are spatially auto-correlated, we expect the human population density values of two neighbouring cells to be more similar to each other than to further away cells (on average).
+
+This auto-correlation can be exogenous (caused by some unknown/untested effects that effect neighbouring cells in a similar manner) or endogenous (caused by the variable we're testing, e.g. temperature).
+
+In the following we're trying to quantify the degree to which neighbouring raster cells are similar to each other, using different definitions/thresholds of "neighbourhood". We then include the determined autocorrelation into our model in order to account for the sum of the exogenous auto-correlation casued by unknown factors. Only by accounting for this can we measure the true effect of our tested variables on human population density.
+
+But before getting into neighbourhoods etc. let us first fit a general linear model to our human population density data, without worrying about auto-correlation.
+
+#### Load factors to test
+First we will need to load the raster data of the factors we want to test for correlation with human population density. You can download whatever variables you want to check (for example get annual precitipitation data if you want to test if precipitation is a predictor of human population density, i.e. if humans for some reason prefer to live in wet or dry areas). A lot of useful climatic data can be found at <http://chelsa-climate.org/bioclim/>, but feel free to use any data source you want to. In this example I will work with annual average precipitation grid data, but preferably chose a different variable to test:
+
+```{r, message=FALSE, warning=FALSE}
+precipitation_file = '../personal/data/CHELSA_bio10_12.tif'
+precipitation_raster = raster(precipitation_file)
+precipitation_raster
+```
+
+Make sure the data is in the same format (resolution and extent of coordinates) as the human population density data. Depending on which data you use, you may have a very high-resolution raster, which can lead to long computational times when running the `aggregate()` command. In my case the following takes around 15 minutes to finish computing: 
+
+```{r, message=FALSE, warning=FALSE, cache=TRUE}
+precipitation_raster_rescaled = aggregate(precipitation_raster, fact = 1/res(precipitation_raster))
+# round the values of the extent of this raster to integers
+extent(precipitation_raster_rescaled) = round(extent(precipitation_raster_rescaled))
+res(precipitation_raster_rescaled)
+```
+
+In my case the loaded raster of global precipitation has a different extent (-180, 180, -90, 84) than the human population density data (-180, 180, -90, 90). It is necessary for our downstream operations that our raster for the response variable (human population density) has the exact same number of cells (rows and columns) as the tested factors (e.g. precipitation). To match the raster of human population density to the precipitation raster we need to remove all data North of the 84th degree latitude. We can do that easily by using the `crop()` function as shown below:
+
+```{r, message=FALSE, warning=FALSE}
+human_pop_data_matched = crop(human_pop_data_rescaled,precipitation_raster_rescaled)
+```
+
+
+Transform both, the cropped human pop density data and the precipitation data into the correct projection:
+
+```{r, message=FALSE, warning=FALSE}
+human_pop_data_matched_cea = projectRaster(human_pop_data_matched,crs="+proj=cea +datum=WGS84 +lat_ts=30")
+precipitation_data_cea = projectRaster(precipitation_raster_rescaled,crs="+proj=cea +datum=WGS84 +lat_ts=30")
+```
+
+Before fitting a correlation model, we need to bring our raster data into a dataframe format. For this let's first extract the coordinates (raster cell centroids) using the `coordinates()` function. These should be the same for both of our rasters, please check if that is the case by repeating the below for your raster of predictor values. You should get the same coordinates and number of points for both rasters.
+
+```{r, message=FALSE, warning=FALSE, cache=TRUE}
+coordinates = coordinates(human_pop_data_matched_cea)
+```
+
+Now get the corresponding values from both rasters, using the `values()` function. Then we put the coordinates and all raster values together into one dataframe:
+
+```{r, message=FALSE, warning=FALSE}
+human_pop_dens = values(human_pop_data_matched_cea)
+precipitation = values(precipitation_data_cea)
+all_data_merged = as.data.frame(cbind(coordinates,human_pop_dens,precipitation))
+```
+
+There are a lot of NA values resultign form the two rasters, which are the water cells that didn't have any values assigned to them. We need to remove those before continuing to work with the data. Therefore let's just remove all rows from the dataframe that contain NA's using the `complete.cases()` function:
+
+```{r, message=FALSE, warning=FALSE}
+final_data = all_data_merged[complete.cases(all_data_merged),]
+```
+
+We need to transform the coordinates back into lat-lon format, since this is required by some of the spatial functions we're using in the following.
+
+```{r, message=FALSE, warning=FALSE}
+coordinates = cbind(final_data$x,final_data$y)
+coordinates_sp = SpatialPoints(coordinates,proj4string = CRS(projection(human_pop_data_matched_cea)))
+coordinates_transformed = spTransform(coordinates_sp, CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"))
+coordinates_df = as.data.frame(coordinates_transformed)
+final_data$x = coordinates_df$coords.x1
+final_data$y = coordinates_df$coords.x2
+```
+
+Now plot the final values of the predictor we want to test against the response variable to get a first impression on their relationship:
+
+```{r, message=FALSE, warning=FALSE}
+plot(final_data$precipitation,final_data$human_pop_dens, pch = 16, xlab = "Precipitation", ylab = "Human pop. density")
+```
+
+In this case it probably makes more sense to log-transform the human population values since they span over several orders of magnitude and most valeus are relatively small (compared to the max value). Let's see what that looks like:
+
+```{r, message=FALSE, warning=FALSE}
+plot(final_data$precipitation,log(final_data$human_pop_dens), pch = 16, xlab = "Precipitation", ylab = "log(Human pop. density)")
+```
+
+This looks better, judging by the better spread of the values along the y-axis. Let's continue with log-transformed values for human population density. In order to avoid -infinity values (`log(0)==-Inf`), assign a very small value to all cells with 0-values:
+
+
+```{r, message=FALSE, warning=FALSE}
+final_data$human_pop_dens[final_data$human_pop_dens==0] = 1e-12
+final_data$human_pop_dens=log(final_data$human_pop_dens)
+```
+
+
+For faster computation, we'll go through the following steps just using a subsample of the data. Note that eventually you need to run the final model using all of the data, but for now let's stick to the subsample.
+
+```{r, message=FALSE, warning=FALSE}
+set.seed(42)
+# take a random sample of 500 points from the dataframe
+subsample = final_data[sample(nrow(final_data), 500), ]
+```
+
+Now fit the linear model to the data and plot the results:
+
+```{r, message=FALSE, warning=FALSE}
+glm_model = glm(human_pop_dens~precipitation,data=subsample)
+xweight = seq(range(subsample$precipitation)[1], range(subsample$precipitation)[2], 1)
+yweight = predict(glm_model, list(precipitation = xweight),type="response")
+plot(subsample$precipitation,subsample$human_pop_dens, pch = 16, xlab = "Precipitation", ylab = "log(Human pop. density)")
+lines(xweight, yweight,col='red')
+```
+
+
+Above in the temporal auto-correlation example we determined the auto-correlation at different lags using the `acf()` function. For spatial data we can use the `correlog()` function which calculates the Moran's I (as mentioned in the introduction slides) for different distances of points:
+
+
+```{r, message=FALSE, warning=FALSE}
+library(ncf)
+autocorrelation_glm = correlog( subsample$x, subsample$y, glm_model$residuals, increment=1000, latlon=T, resamp=100)
+plot(autocorrelation_glm)
+```
+
+You can see that for close distances (< 4000 km) we find a strong positive spatial auto-correlation. This is a common pattern for spatial data and is the reason why we need to bother with accounting for this auto-correlation in our model. 
+
+In order to formalize this spatial auto-correlation and integrate it into our linear model, we need some measure of neighbourhood. We can use the `knearneigh()` function to identify the n closest neighbouring cells for each given cell. In the example below we extract the 2 closest neighbours for each cell:
+
+```{r, message=FALSE, warning=FALSE}
+library(spdep)
+
+nearest_neighbours_2 = knearneigh(cbind(subsample$x, subsample$y),2,longlat = T)
+# This function sorts out the spatial elements
+neighbourlist_2_closests = knn2nb(nearest_neighbours_2)
+# This illustrates what we have done
+plot(neighbourlist_2_closests, cbind(subsample$x, subsample$y))
+```
+
+This looks very abstract, but you can roughly see the continents or islands the points in our random subsample were drawn from and the two closest neighbours of each point connected by lines. Note that the very long lines going across the whole map are a result of the Earth being round.
+
+Now we will apply the SAR model (`errorsarlm()`), which allows us to incorporate the neighbourhood of points. The formula of the SAR model is a modification of the general linear model (`y = X beta + u, u = lambda W u + e`), adding the error term `u`. The `W` in this error term are our modeled neighbourhood relationships, which are parsed to the function using the `listw()` argument.
+
+```{r, message=FALSE, warning=FALSE}
+sar_model = errorsarlm(human_pop_dens~precipitation, data=subsample, listw=nb2listw(neighbourlist_2_closests), tol.solve = 1e-12, zero.policy =T)
+autocorrelation_sar = correlog(subsample$x, subsample$y, sar_model$residuals, increment=1000, latlon=T, resamp=100)
+plot(autocorrelation_sar)
+```
+
+You can see that accounting for the two closest neighbours has already dramatically improved our results. Note that the strong spatial auto-correlation at very small distances has disappeared and that the highest values lies at around 0.2, which is much smaller than the autocorrelation we got at small distances with the GLM (general linear model).
+
+However we can improve this model further by testing different definitions of neighbourhood. Instead of calculating the distance to the n closest neighbours with the `knearneigh()` function, we can instead use the `dnearneigh()` function, which is based on a distance threshold and extracts all points within that distance. For example the following command extracts all points that are within a distance of 1500km of each point:
+
+```{r, message=FALSE, warning=FALSE}
+neighbours_1500km = dnearneigh(cbind(subsample$x,subsample$y), 0,1500, longlat = T)
+# This illustrates what we have done
+plot(neighbours_1500km, cbind(subsample$x, subsample$y))
+```
+
+You see that the neighbourhoods look very different, since only points within 1500 km are connected. This also leads to some points having no neighbours at all, since they are too isolated. Let's see how this neighbourhood definition performs compared to the n closests model from before. Note: The `zero.policy =T` argument in the SAR model and in the `nb2listw()` function is necessary to account for points without neighbours.
+
+```{r, message=FALSE, warning=FALSE}
+sar_model = errorsarlm(human_pop_dens~precipitation, data=subsample, listw=nb2listw(neighbours_1500km,zero.policy =T), tol.solve = 1e-12, zero.policy =T)
+autocorrelation_sar = correlog(subsample$x, subsample$y, sar_model$residuals, increment=1000, latlon=T, resamp=100)
+plot(autocorrelation_sar)
+```
+
+The results don't look too different to before. Normally one should test a bunch of different configurations of the `knearneigh()` and `dnearneigh()` neighbourhoods, using different numbers of neighbours and different distances respectively. After testing different configurations the best model can be selected using a model selection criterion such as AIC. For that purpose we first define a function that runs through all our desired model configurations. Note: one can also try different values for the `style=` argument, common options are `B`,`C`,`U`,`S`, or `W` as used in the example below:
+
+```{r, message=FALSE, warning=FALSE}
+Neighborhood_generator=function(COOR) {
+models<<-list(
+  nb2listw(knn2nb(knearneigh(COOR,1, longlat = T)),style="W",zero.policy =T),
+  nb2listw(knn2nb(knearneigh(COOR,2, longlat = T)),style="W",zero.policy =T),
+  nb2listw(knn2nb(knearneigh(COOR,3, longlat = T)),style="W",zero.policy =T),
+  nb2listw(knn2nb(knearneigh(COOR,4, longlat = T)),style="W",zero.policy =T),
+  nb2listw(knn2nb(knearneigh(COOR,5, longlat = T)),style="W",zero.policy =T),
+  nb2listw(knn2nb(knearneigh(COOR,6, longlat = T)),style="W",zero.policy =T),
+  nb2listw(knn2nb(knearneigh(COOR,7, longlat = T)),style="W",zero.policy =T),
+  nb2listw(knn2nb(knearneigh(COOR,8, longlat = T)),style="W",zero.policy =T),
+  nb2listw(knn2nb(knearneigh(COOR,9, longlat = T)),style="W",zero.policy =T),
+  nb2listw(knn2nb(knearneigh(COOR,10, longlat = T)),style="W",zero.policy =T),
+  nb2listw(dnearneigh(COOR, 0,250, longlat = T),style="W",zero.policy =T),
+  nb2listw(dnearneigh(COOR, 0,500, longlat = T),style="W",zero.policy =T),
+  nb2listw(dnearneigh(COOR, 0,750, longlat = T),style="W",zero.policy =T),
+  nb2listw(dnearneigh(COOR, 0,1000, longlat = T),style="W",zero.policy =T),
+  nb2listw(dnearneigh(COOR, 0,1250, longlat = T),style="W",zero.policy =T),
+  nb2listw(dnearneigh(COOR, 0,1500, longlat = T),style="W",zero.policy =T),
+  nb2listw(dnearneigh(COOR, 0,2000, longlat = T),style="W",zero.policy =T),
+  nb2listw(dnearneigh(COOR, 0,2500, longlat = T),style="W",zero.policy =T),
+  nb2listw(dnearneigh(COOR, 0,3000, longlat = T),style="W",zero.policy =T),
+  nb2listw(dnearneigh(COOR, 0,3500, longlat = T),style="W",zero.policy =T),
+  nb2listw(dnearneigh(COOR, 0,4000, longlat = T),style="W",zero.policy =T)
+)
+}
+```
+
+
+Now we apply that function to our coordinates of the random subsample of our data:
+
+```{r, message=FALSE, warning=FALSE}
+neighbourhood_models = Neighborhood_generator(cbind(subsample$x,subsample$y))
+```
+
+Calculate the AIC score for each neighbourhood model:
+```{r, message=FALSE, warning=FALSE}
+library(wiqid)
+
+AIC_LIST=numeric(length(neighbourhood_models))
+for (i in 1:length(neighbourhood_models)) {
+	AIC_LIST[i]=AICc(errorsarlm(human_pop_dens~precipitation, data=subsample,listw=neighbourhood_models[[i]], tol.solve = 1e-12, zero.policy =T))
+}
+```
+
+Select the model with the lowest AIC score as the best model:
+
+```{r, message=FALSE, warning=FALSE}
+index_best_model = which(AIC_LIST==min(AIC_LIST))
+best_neighbour_model = neighbourhood_models[index_best_model]
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+sar_model = errorsarlm(human_pop_dens~precipitation, data=subsample, listw=best_neighbour_model[[1]], tol.solve = 1e-12, zero.policy =T)
+autocorrelation_sar = correlog(subsample$x, subsample$y, sar_model$residuals, increment=1000, latlon=T, resamp=100)
+plot(autocorrelation_sar)
+```
+
+
