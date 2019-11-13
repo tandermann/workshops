@@ -95,13 +95,8 @@ Now it's time to load the data for the predictor variables, which are the factor
 ```{r, message=FALSE, warning=FALSE}
 precipitation_file = '../personal/data/CHELSA_bio10_12.tif'
 precipitation_raster = raster(precipitation_file)
-plot(precipitation_raster,main='Precipitation')
-```
-
-It's generally good practice to log-transform absolute precipitation values, since they spread over several orders of magnitudes. That's done like this:
-
-```{r, message=FALSE, warning=FALSE, cache=TRUE}
-values(precipitation_raster) = log(values(precipitation_raster))
+#plot(precipitation_raster,main='Precipitation')
+precipitation_raster
 ```
 
 If you are using bioclim data you'll see that the resolution of the raster is incredibly high, which makes for very slow processing times for all operations on the raster. Let's therefore first reduce the data to a lower resolution.
@@ -166,16 +161,6 @@ Let's see if it worked:
 print(dim(diversity_raster))
 print(dim(precipitation_data_matched))
 ```
-
-For faster processing in the following, let us reduce the resolution of the rasters some more, say by factor 3:
-
-```{r, message=FALSE, warning=FALSE}
-#final_diversity_raster = aggregate(diversity_raster,factor=3)
-#final_precipitation_raster = aggregate(precipitation_data_matched,factor=3)
-final_diversity_raster = diversity_raster
-final_precipitation_raster = precipitation_data_matched
-```
-
 
 
 ### Fitting linear models
@@ -245,15 +230,15 @@ But before getting into neighbourhoods etc. let us first fit a general linear mo
 
 First we need to bring our raster data into a dataframe format. For this we extract the coordinates (raster cell centroids) using the `coordinates()` function. The coordinates should be identical for both of our rasters, check if that is the case by repeating the below for your raster of predictor values. You should get the same coordinates and number of points for both rasters.
 
-```{r, message=FALSE, warning=FALSE, cache=TRUE}
-coordinates = coordinates(final_diversity_raster)
+```{r, message=FALSE, warning=FALSE}
+coordinates = coordinates(diversity_raster)
 ```
 
 Now get the corresponding values from both rasters, using the `values()` function. Then we put the coordinates and all raster values together into one dataframe:
 
 ```{r, message=FALSE, warning=FALSE}
-species_div = values(final_diversity_raster)
-precipitation = values(final_precipitation_raster)
+species_div = values(diversity_raster)
+precipitation = values(precipitation_data_matched)
 all_data_merged = as.data.frame(cbind(coordinates,species_div,precipitation))
 ```
 
@@ -261,6 +246,7 @@ There are a lot of NA values resulting from the water cells in the two rasters, 
 
 ```{r, message=FALSE, warning=FALSE}
 final_data = all_data_merged[complete.cases(all_data_merged),]
+final_data$precipitation = log(final_data$precipitation)
 ```
 
 Further it is good practice to scale the values for both the response and the predictor variables to be centered in 0 using the `scale()` function:
@@ -325,7 +311,7 @@ In order to formalize this spatial auto-correlation and integrate it into our li
 
 ```{r, message=FALSE, warning=FALSE}
 coordinates = cbind(subsample$x,subsample$y)
-coordinates_sp = SpatialPoints(coordinates,proj4string = CRS(projection(final_diversity_raster)))
+coordinates_sp = SpatialPoints(coordinates,proj4string = CRS(projection(diversity_raster)))
 coordinates_transformed = spTransform(coordinates_sp, CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"))
 coordinates_df = as.data.frame(coordinates_transformed)
 subsample$x = coordinates_df$coords.x1
