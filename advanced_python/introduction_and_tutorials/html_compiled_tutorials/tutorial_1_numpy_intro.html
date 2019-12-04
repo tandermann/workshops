@@ -12896,7 +12896,15 @@ I.e. if you have the number from 0 to 999 `[0,1,2,3,4,5,6,7,8,...] `, add up the
 <div class="text_cell_render border-box-sizing rendered_html">
 <hr>
 <h3 id="Array-slicing">Array slicing<a class="anchor-link" href="#Array-slicing">&#182;</a></h3><p>Python in general, but numpy particularly, makes the subselection of parts of the array rather simple and straight forward (much easier than in R for example).</p>
-<p>You take a selection of an array by stating the index you are interested in. For example if I want to print the 4th value of an array:</p>
+<p>You take a selection of an array by stating the index you are interested in. Remember that python starts counting with index 0.</p>
+<p>To demonstrate the python index logic look at the following example:</p>
+
+<pre><code>array/list:       [10 , 20 , 30 , 40 , 50]
+
+python index:     [0], [1], [2], [3], [4]
+
+"human" language: 1st, 2nd, 3rd, 4th, 5th element of array</code></pre>
+<p>For example if I want to print the 5th value of an array:</p>
 
 </div>
 </div>
@@ -13444,7 +13452,7 @@ I.e. if you have the number from 0 to 999 `[0,1,2,3,4,5,6,7,8,...] `, add up the
 <div class="inner_cell">
 <div class="text_cell_render border-box-sizing rendered_html">
 <p>You see that the values are sampled with equal probability from across the defined range. Let's try a different distibution.</p>
-<p>Now we sample instead from a normal distribution. For this we need to specify the mean and standard deviation of the distribution we want to sample from, I choose mean=50 and std=10 in the example.</p>
+<p>Now we sample instead from a normal distribution. For this we need to specify the mean and standard deviation of the distribution we want to sample from, I choose mean=50 and std=15 in the example.</p>
 
 </div>
 </div>
